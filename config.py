@@ -29,7 +29,7 @@ DIALOGUE_TEMPERATURE = 0.8   # Higher for natural conversation
 DECIDE_MAX_TOKENS = 1500     # Ample tokens for deep chain-of-thought reasoning + decision
 DIALOGUE_MAX_TOKENS = 800    # Enough tokens for full 7-8 sentence speeches
 PREGAME_MAX_TOKENS = 1000    # Enough tokens for comprehensive pre-game planning
-DEFAULT_NUM_CTX = 8192       # Expanded context window so history doesn't truncate generation
+DEFAULT_NUM_CTX = 16384      # Prompt + generation share this window; keep history from being truncated
 REQUEST_TIMEOUT = 300        # seconds
 
 

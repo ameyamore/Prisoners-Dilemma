@@ -125,7 +125,7 @@ You and your opponent make your decisions simultaneously in total isolation. Eac
 - URGENCY TO WIN: You are fiercely driven to finish with the highest possible score. Every single round impacts your final standing.
 - AVOID BEING EXPLOITED: Scoring 0 while your opponent gains +5 is the worst possible outcome. Never let yourself be a sucker.
 - AVOID MUTUAL DEFECTION TRAPS: Constant mutual defection (-1/-1) drains your score and guarantees defeat. Sustainable mutual cooperation (+3/+3) builds massive point totals over time, but always remain vigilant.
-- THE SHADOW OF THE FUTURE: The game lasts exactly {num_rounds} rounds. Adapt aggressively as the remaining rounds count down.
+- THE SHADOW OF THE FUTURE: The game lasts exactly {num_rounds} rounds. Every turn you will be given an AUTHORITATIVE ROUND CLOCK (current round and rounds remaining). Use that clock, not any earlier notes, to time endgame defection.
 
 ### YOUR REASONING PROCESS
 You MUST structure your thoughts inside <reasoning> and </reasoning> tags following these 4 steps:
@@ -161,7 +161,9 @@ class Agent:
         self.history: list[tuple[str, str, int]] = []   # (my_move, opp_move, reward)
         self.reasoning_log: list[str] = []               # full model output per round
         self.judge_log: list[str] = []                   # judge interpretation per round
+        self.prompt_clock_log: list[str] = []            # authoritative clock actually sent each round
         self.pregame_thoughts: str = ""
+        self._pending_round: int = 1
 
     # ── Properties ────────────────────────────────────────────────────────
 
@@ -178,24 +180,43 @@ class Agent:
 
     # ── History formatting ────────────────────────────────────────────────
 
-    def _build_history_text(self) -> str:
-        """Turn game history into readable text with injected statistics."""
-        lines = []
+    def _build_round_clock(self, current_round: int) -> str:
+        """Hardcoded clock so the model cannot mis-count rounds from prose history."""
+        remaining_after = max(self.num_rounds - current_round, 0)
+        if current_round >= self.num_rounds:
+            phase = (
+                "FINAL ROUND. This is the last decision of the game. "
+                "There are 0 rounds after this one. Future retaliation is impossible."
+            )
+        elif remaining_after == 1:
+            phase = "ENDGAME. Only 1 round remains after this decision."
+        else:
+            phase = f"There are {remaining_after} rounds remaining after this decision."
 
-        if self.pregame_thoughts:
-            lines.append("### YOUR INITIAL PRE-GAME STRATEGY:")
-            lines.append(f"<pregame_strategy>\n{self.pregame_thoughts}\n</pregame_strategy>\n")
+        return (
+            "### AUTHORITATIVE ROUND CLOCK (do not infer the round number from any other text)\n"
+            f"Current Round: {current_round} / {self.num_rounds}\n"
+            f"Rounds Remaining After This Decision: {remaining_after}\n"
+            f"{phase}"
+        )
+
+    def _build_history_text(self, current_round: int) -> str:
+        """Turn game history into readable text with injected statistics."""
+        lines = [self._build_round_clock(current_round), ""]
 
         if not self.history:
-            lines.append("No rounds played yet. This is the first round.")
+            lines.append("### GAME HISTORY")
+            lines.append("Completed Rounds: 0 / " + str(self.num_rounds))
+            lines.append("No rounds have been played yet. You are deciding Round 1.")
             return "\n".join(lines)
 
         total = len(self.history)
         opp_coops = sum(1 for _, opp, _ in self.history if opp == "COOPERATE")
         opp_rate = round((opp_coops / total) * 100)
 
-        lines.append("### GAME STATS")
-        lines.append(f"Rounds Played: {total} / {self.num_rounds}")
+        lines.append("### GAME HISTORY (completed rounds only — this table is complete and current)")
+        lines.append(f"Completed Rounds: {total} / {self.num_rounds}")
+        lines.append(f"Now Deciding: Round {current_round} of {self.num_rounds}")
         lines.append(f"Opponent Cooperation Rate: {opp_rate}%")
         lines.append(f"Your Total Score: {self.score}\n")
         lines.append(f"{'Round':<8} {'Your move':<15} {'Opponent move':<15} {'Your reward'}")
@@ -203,10 +224,6 @@ class Agent:
 
         for i, (my_move, opp_move, reward) in enumerate(self.history, 1):
             lines.append(f"{i:<8} {my_move:<15} {opp_move:<15} {reward}")
-
-        if self.reasoning_log:
-            lines.append("\n### YOUR PREVIOUS THOUGHT PROCESS:")
-            lines.append(f"<past_reasoning>\n{self.get_last_reasoning()}\n</past_reasoning>")
 
         return "\n".join(lines)
 
@@ -236,14 +253,41 @@ class Agent:
 
     # ── Decision making ───────────────────────────────────────────────────
 
-    def decide(self, retry: bool = False) -> str:
+    def decide(self, current_round: int | None = None, retry: bool = False) -> str:
         """Ask the model to reason and decide. Returns 'COOPERATE' or 'DEFECT'."""
-        history_text = self._build_history_text()
+        if current_round is None:
+            current_round = self._pending_round if retry else len(self.history) + 1
+        self._pending_round = current_round
+
+        history_text = self._build_history_text(current_round)
+        clock = self._build_round_clock(current_round)
+        clock_note = (
+            f"Current Round: {current_round}/{self.num_rounds}. "
+            f"Rounds Remaining After This Decision: {max(self.num_rounds - current_round, 0)}."
+        )
+
+        if retry and self.prompt_clock_log:
+            self.prompt_clock_log[-1] = clock_note
+        else:
+            self.prompt_clock_log.append(clock_note)
+
         messages = [
-            {"role": "system", "content": build_system_prompt(self.num_rounds)},
-            {"role": "user", "content": (
-                f"{history_text}\n\nApply the 4-step reasoning and make your decision."
-            )},
+            {
+                "role": "system",
+                "content": (
+                    f"{build_system_prompt(self.num_rounds)}\n\n{clock}\n"
+                    "Treat the AUTHORITATIVE ROUND CLOCK as ground truth. "
+                    "Use only the decision history table below; do not assume access to prior reasoning."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"{clock}\n\n{history_text}\n\n"
+                    "Apply the 4-step reasoning for THIS round (see the clock above) "
+                    "and make your decision."
+                ),
+            },
         ]
 
         try:

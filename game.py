@@ -196,6 +196,7 @@ def save_log(
                 {
                     "round": i + 1,
                     "move": rounds_log[i]["move1"],
+                    "prompt_clock": agent1.prompt_clock_log[i] if i < len(agent1.prompt_clock_log) else "",
                     "reasoning": agent1.reasoning_log[i],
                 }
                 for i in range(len(agent1.reasoning_log))
@@ -204,6 +205,7 @@ def save_log(
                 {
                     "round": i + 1,
                     "move": rounds_log[i]["move2"],
+                    "prompt_clock": agent2.prompt_clock_log[i] if i < len(agent2.prompt_clock_log) else "",
                     "reasoning": agent2.reasoning_log[i],
                 }
                 for i in range(len(agent2.reasoning_log))
@@ -374,10 +376,10 @@ def run_game(
         console.print(Rule(f"[bold]Round {round_num} / {num_rounds}[/]"))
 
         console.print("[dim]⏳ Agent 1 is thinking...[/]")
-        move1 = agent1.decide()
+        move1 = agent1.decide(current_round=round_num)
 
         console.print("[dim]⏳ Agent 2 is thinking...[/]")
-        move2 = agent2.decide()
+        move2 = agent2.decide(current_round=round_num)
 
         reward1, reward2 = get_payoff(move1, move2)
 
