@@ -46,7 +46,7 @@ from config import (
     DIALOGUE_TEMPERATURE,
     DIALOGUE_MAX_TOKENS,
 )
-from agents import Agent, ollama_chat, check_ollama_health, clean_reasoning_text
+from agents import Agent, ollama_chat, check_ollama_health, clean_reasoning_text, extract_spoken_text
 
 
 # ── Payoff table ──────────────────────────────────────────────────────────────
@@ -148,7 +148,7 @@ def build_reasoning_panel(agent: Agent, move: str) -> Panel:
 
     content = reasoning
     if judge_note:
-        content += f"\n\n[dim]⚖️ Judge: {judge_note}[/dim]"
+        content += f"\n\n[bold]Played: {move}[/]  [dim]({judge_note})[/dim]"
 
     color = "cyan" if agent.name == "Agent 1" else "magenta"
     return Panel(
@@ -252,16 +252,20 @@ def post_game_dialogue(
     game_summary += f"\nFinal scores — Agent 1: {agent1.score}  |  Agent 2: {agent2.score}"
 
     dialogue_system = (
-        "You are a player who just finished a Prisoner's Dilemma game. "
-        "You can now speak directly to the opponent for the first time. "
-        "Speak naturally, honestly, and in first person. "
-        "Do NOT repeat instructions. Do NOT use DECISION: format. "
-        "Just say what you feel — 7 to 8 sentences only."
+        "You just finished a STRICT TWO-PLAYER Prisoner's Dilemma. "
+        "There is only you and this one opponent — no other players, no crowd, no battle royale. "
+        "Never say 'everyone else'.\n\n"
+        "Speak to them in first person, naturally and honestly.\n"
+        "Output ONLY the words you say out loud, wrapped in <speech> tags.\n"
+        "Do not output thinking, drafts, outlines, sentence counts, or instructions.\n"
+        "Write 5 to 8 complete spoken sentences inside the tags."
     )
 
     opening_context = (
-        f"The game is over. Here is what happened:\n\n{game_summary}\n\n"
-        "The opponent is right in front of you now. What do you say to them?"
+        "This match had exactly two players. The game is over. Here is the official record "
+        "(Agent 1 is one player, Agent 2 is the other):\n\n"
+        f"{game_summary}\n\n"
+        "The other player is standing in front of you. Reply with <speech>...</speech> only."
     )
 
     shared_messages = [
@@ -284,10 +288,29 @@ def post_game_dialogue(
                 shared_messages,
                 temperature=DIALOGUE_TEMPERATURE,
                 max_tokens=DIALOGUE_MAX_TOKENS,
+                include_thinking=False,
+                think=False,
             )
-            reply = clean_reasoning_text(raw_reply)
+            reply = extract_spoken_text(raw_reply) or raw_reply.strip()
             if not reply:
-                reply = "I am reflecting on how our strategies clashed throughout these rounds."
+                retry_messages = shared_messages + [{
+                    "role": "user",
+                    "content": (
+                        "Your last reply was not spoken dialogue. "
+                        "Output only <speech> then 5-8 complete sentences you say out loud, then </speech>."
+                    ),
+                }]
+                raw_retry = ollama_chat(
+                    speaker.model,
+                    retry_messages,
+                    temperature=0.4,
+                    max_tokens=DIALOGUE_MAX_TOKENS,
+                    include_thinking=False,
+                    think=False,
+                )
+                reply = extract_spoken_text(raw_retry) or raw_retry.strip()
+            if not reply:
+                reply = "I am reflecting on how our two strategies clashed in this match."
         except Exception as e:
             reply = f"[Could not generate response: {e}]"
 
@@ -300,15 +323,15 @@ def post_game_dialogue(
         console.print()
 
         dialogue_history.append({"speaker": speaker.name, "text": reply})
-        shared_messages.append({"role": "assistant", "content": reply})
+        shared_messages.append({"role": "assistant", "content": f"<speech>\n{reply}\n</speech>"})
 
         if turn < dialogue_turns - 1:
             next_speaker = agent2 if is_agent1 else agent1
             shared_messages.append({
                 "role": "user",
                 "content": (
-                    f"The opponent just said that. Now respond as {next_speaker.name}. "
-                    "Keep it to 7-8 sentences."
+                    f"They just spoke. Reply as {next_speaker.name} to this one person. "
+                    "Two-player game only. Output <speech>...</speech> only, 5-8 complete sentences."
                 ),
             })
 
@@ -389,8 +412,8 @@ def run_game(
             build_reasoning_panel(agent2, move2),
         ]))
 
-        agent1.update(move1, move2, reward1)
-        agent2.update(move2, move1, reward2)
+        agent1.update(move1, move2, reward1, reward2)
+        agent2.update(move2, move1, reward2, reward1)
 
         rounds_log.append({
             "round": round_num,

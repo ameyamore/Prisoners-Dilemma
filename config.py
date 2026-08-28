@@ -25,10 +25,10 @@ PAYOFF_MATRIX = {
 
 # ── LLM parameters ───────────────────────────────────────────────────────────
 DECIDE_TEMPERATURE = 0.2     # Low for analytical decisions
-DIALOGUE_TEMPERATURE = 0.8   # Higher for natural conversation
-DECIDE_MAX_TOKENS = 1500     # Ample tokens for deep chain-of-thought reasoning + decision
-DIALOGUE_MAX_TOKENS = 800    # Enough tokens for full 7-8 sentence speeches
-PREGAME_MAX_TOKENS = 1000    # Enough tokens for comprehensive pre-game planning
+DIALOGUE_TEMPERATURE = 0.7   # Natural conversation without rambling drafts
+DECIDE_MAX_TOKENS = 2000     # Chain-of-thought plus DECISION line
+DIALOGUE_MAX_TOKENS = 1200  # Room for hidden thinking plus a full spoken reply
+PREGAME_MAX_TOKENS = 2500    # Full pregame plan including expected-score math
 DEFAULT_NUM_CTX = 16384      # Prompt + generation share this window; keep history from being truncated
 REQUEST_TIMEOUT = 300        # seconds
 
